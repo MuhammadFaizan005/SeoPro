@@ -1,0 +1,6 @@
+logs
+latest_logs
+downloaded_files
+archived_logs
+.pytest_cache
+__pycache__

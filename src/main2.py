@@ -107,282 +107,199 @@ def test_google_search(query_config):
         driver.get("https://www.google.com/")
         logger.info("Navigated to Google")
         
-        # Simulate human-like typing
-        search_box = WebDriverWait(driver, 5).until(
-            EC.presence_of_element_located((By.NAME, "q"))
-        )
-        search_box.click()
-        time.sleep(1)
-        search_box.clear()
+        # Simulate human-like typing with retry mechanism
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                search_box = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.NAME, "q"))
+                )
+                search_box.click()
+                time.sleep(1)
+                search_box.clear()
+                
+                # Type the web match query
+                for char in query_config["web_match"]:
+                    search_box.send_keys(char)
+                    time.sleep(random.uniform(0.1, 0.3))
+                search_box.send_keys(Keys.RETURN)
+                logger.info(f"Submitted search query: {query_config['web_match']}")
+                break
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise
+                logger.warning(f"Attempt {attempt + 1} failed, retrying...")
+                time.sleep(2)
         
-        # Type the web match query
-        for char in query_config["web_match"]:
-            search_box.send_keys(char)
-            time.sleep(random.uniform(0.1, 0.3))
-        search_box.send_keys(Keys.RETURN)
-        logger.info(f"Submitted search query: {query_config['web_match']}")
-        
-        # Wait for search results
-        WebDriverWait(driver, 5).until(
+        # Wait for search results with increased timeout
+        WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.ID, "search"))
         )
         
-        try:
-            # Wait for the search results to load
-            time.sleep(2)
-            logger.info("Looking for pagination table...")
-            try:
-                # Try the new pagination structure first
-                pages_table = WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "AaVjTc"))
-                )
-                logger.info("Found new pagination table structure")
-            except:
-                # Fallback to old structure
-                logger.info("Trying old pagination structure...")
-                pages_table = WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "TeSSVd"))
-                )
-                logger.info("Found old pagination table structure")
-
-            # Find all pagination elements
-            pages = pages_table.find_elements(By.TAG_NAME, "td")
-            logger.info(f"Found {len(pages)} pagination elements")
-            
-            len_results = None
-            # Look for the "Next" button in the last cell
-            for page in pages:
+        def get_search_results():
+            """Get search results with retry mechanism."""
+            max_retries = 3
+            for attempt in range(max_retries):
                 try:
-                    if page.get_attribute("aria-level"):
-                        len_results = page.get_attribute("aria-level")
-                        logger.info(f"Found pagination with {len_results} pages")
-                        break
-                except:
-                    continue
+                    # Wait for results to be present
+                    WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.CLASS_NAME, "yuRUbf"))
+                    )
+                    
+                    # Get all search results
+                    results = driver.find_elements(By.CLASS_NAME, "yuRUbf")
+                    if results:
+                        return results
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        raise
+                    logger.warning(f"Attempt {attempt + 1} to get results failed, retrying...")
+                    time.sleep(2)
+            return []
 
-            if not len_results:
-                logger.info("No pagination found or no page count attribute present")
-            
+        def process_search_result(result):
+            """Process a single search result with retry mechanism."""
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    # Scroll to the element
+                    scroll_to_element(driver, result)
+                    time.sleep(1)  # Wait for scroll to complete
+                    
+                    # Get link and heading with explicit wait
+                    link_element = WebDriverWait(result, 5).until(
+                        EC.presence_of_element_located((By.TAG_NAME, "a"))
+                    )
+                    heading_element = WebDriverWait(result, 5).until(
+                        EC.presence_of_element_located((By.TAG_NAME, "h3"))
+                    )
+                    
+                    link = link_element.get_attribute("href")
+                    heading_text = heading_element.text
+                    
+                    return link, heading_text, link_element
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        raise
+                    logger.warning(f"Attempt {attempt + 1} to process result failed, retrying...")
+                    time.sleep(2)
+            return None, None, None
 
-            def get_headings(driver):
-                logger.info("Fetching search result headings...")
-                # Find all search result elements
-                headings = WebDriverWait(driver, 5).until(
-                    EC.presence_of_all_elements_located((By.CLASS_NAME, "yuRUbf"))
-                )
-                logger.info(f"Found {len(headings)} search result headings")
-                return headings
-            
-            logger.info(f"\nSearch results for query: {query_config['web_match']}")
-            logger.info("-" * 50)
-            
-            def match_links(driver, result_headings, query_config):
-                logger.info(f"Starting link matching process for {len(result_headings)} results")
-                match_flag = False
-                for idx, heading in enumerate(result_headings, 1):
-                    try:
-                        # Scroll to the element
-                        logger.info(f"Processing result {idx}/{len(result_headings)}")
-                        scroll_to_element(driver, heading)
-                        
-                        # Extract the link and heading text
-                        href = heading.find_element(By.TAG_NAME, "a")
-                        link = href.get_attribute("href")
-                        heading_text = heading.find_element(By.TAG_NAME, "h3").text
-                        
-                        # Log the extracted data
-                        logger.info(f"Title: {heading_text}")
-                        logger.info(f"Link: {link}")
-                        
-                        if query_config['web_match'][1] in link:
-                            logger.info(f"Found matching link: {link}")
-                            logger.info(f"Match found at position {idx}")
-                            logger.info("-" * 30)
-                            match_flag = True
-                            # Store the link for later use
-                            return href, match_flag, link
-                        logger.info("-" * 30)
-                        
-                        # Pause between iterations
+        def navigate_to_page(url, element=None):
+            """Navigate to a page with retry mechanism."""
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    if element:
+                        # Try JavaScript click first
+                        driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", element)
                         time.sleep(1)
-                    except Exception as e:
-                        logger.error(f"Error processing result {idx}: {str(e)}")
-                        continue
-                
-                if not match_flag:
-                    logger.info("No matching link found on current page")
-                return None, match_flag, None
+                        driver.execute_script("arguments[0].click();", element)
+                    else:
+                        driver.get(url)
+                    
+                    # Wait for URL to change
+                    WebDriverWait(driver, 10).until(
+                        lambda d: d.current_url != "https://www.google.com/search"
+                    )
+                    
+                    # Wait for page load
+                    WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.TAG_NAME, "body"))
+                    )
+                    
+                    return True
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        return False
+                    logger.warning(f"Attempt {attempt + 1} to navigate failed, retrying...")
+                    time.sleep(2)
+            return False
 
-            if len_results:
-                logger.info(f"Starting pagination search through {len_results} pages")
-                for page in range(int(len_results)):
-                    logger.info(f"\nProcessing page {page + 1}/{len_results}")
-                    headings_new = get_headings(driver)
-                    match_element, flag, target_url = match_links(driver, headings_new, query_config)
-                    if flag and match_element:
-                        logger.info(f"Match found on page {page + 1}, preparing to click link...")
-                        try:
-                            # Scroll the element into view again
-                            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", match_element)
-                            time.sleep(1)  # Wait for scroll to complete
-                            
-                            # Try JavaScript click first
-                            logger.info("Attempting JavaScript click...")
-                            driver.execute_script("arguments[0].click();", match_element)
-                            
-                            # Wait for URL to change
-                            logger.info("Waiting for URL to change...")
-                            WebDriverWait(driver, 5).until(
-                                lambda d: d.current_url != "https://www.google.com/search"
-                            )
-                            
-                            current_url = driver.current_url
-                            logger.info(f"Successfully navigated to: {current_url}")
-                            
-                            # Store the visited page
+        # Process search results
+        current_page = 1
+        max_pages = 5  # Limit the number of pages to search
+        found_match = False
+
+        while current_page <= max_pages and not found_match:
+            logger.info(f"\nProcessing page {current_page}")
+            
+            # Get search results
+            results = get_search_results()
+            if not results:
+                logger.info("No results found on current page")
+                break
+
+            # Process each result
+            for idx, result in enumerate(results, 1):
+                try:
+                    link, heading_text, link_element = process_search_result(result)
+                    if not link:
+                        continue
+
+                    logger.info(f"Result {idx}: {heading_text}")
+                    logger.info(f"Link: {link}")
+
+                    # Check if the link matches our criteria
+                    if any(match in link.lower() for match in [m.lower() for m in query_config['web_match']]):
+                        logger.info(f"Found matching link: {link}")
+                        found_match = True
+                        
+                        # Navigate to the page
+                        if navigate_to_page(link, link_element):
                             visited_pages.append({
-                                'url': current_url,
+                                'url': driver.current_url,
                                 'title': driver.title,
                                 'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             })
-                            
-                            time.sleep(2)  # Additional wait for page load
                             break
-                        except Exception as e:
-                            logger.error(f"Error clicking link: {str(e)}")
-                            # Fallback to direct navigation
-                            try:
-                                logger.info("Attempting direct navigation...")
-                                driver.get(target_url)
-                                current_url = driver.current_url
-                                logger.info(f"Directly navigated to: {current_url}")
-                                
-                                # Store the visited page
-                                visited_pages.append({
-                                    'url': current_url,
-                                    'title': driver.title,
-                                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                })
-                                
-                                time.sleep(2)
-                                break
-                            except Exception as e2:
-                                logger.error(f"Error in direct navigation: {str(e2)}")
-                    else:
-                        logger.info(f"No match found on page {page + 1}")
-                        if page < int(len_results) - 1:
-                            logger.info("Moving to next page...")
-                            try:
-                                next_button = driver.find_element(By.ID, "pnnext")
-                                next_button.click()
-                                logger.info("Clicked next page button")
-                                time.sleep(2)
-                            except Exception as e:
-                                logger.error(f"Error clicking next page button: {str(e)}")
-                                break
-            else:
-                logger.info("No pagination found, searching only current page")
-                headings_new = get_headings(driver)
-                match_element, flag, target_url = match_links(driver, headings_new, query_config)
-                if flag and match_element:
-                    logger.info("Match found on current page, preparing to click link...")
-                    try:
-                        # Scroll the element into view again
-                        driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", match_element)
-                        time.sleep(1)  # Wait for scroll to complete
-                        
-                        # Try JavaScript click first
-                        logger.info("Attempting JavaScript click...")
-                        driver.execute_script("arguments[0].click();", match_element)
-                        
-                        # Wait for URL to change
-                        logger.info("Waiting for URL to change...")
-                        WebDriverWait(driver, 5).until(
-                            lambda d: d.current_url != "https://www.google.com/search"
-                        )
-                        
-                        current_url = driver.current_url
-                        logger.info(f"Successfully navigated to: {current_url}")
-                        
-                        # Store the visited page
+                except Exception as e:
+                    logger.error(f"Error processing result {idx}: {str(e)}")
+                    continue
+
+            if found_match:
+                break
+
+            # Try to go to next page
+            try:
+                next_button = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.ID, "pnnext"))
+                )
+                next_button.click()
+                current_page += 1
+                time.sleep(2)
+            except Exception as e:
+                logger.info("No more pages available")
+                break
+
+        # Process follow-up links
+        if query_config["follow_up_links"]:
+            logger.info("\nProcessing follow-up links...")
+            for i, follow_up_link in enumerate(query_config["follow_up_links"], 1):
+                try:
+                    logger.info(f"\n[{i}/{len(query_config['follow_up_links'])}] Visiting follow-up link: {follow_up_link}")
+                    if navigate_to_page(follow_up_link):
                         visited_pages.append({
-                            'url': current_url,
+                            'url': driver.current_url,
                             'title': driver.title,
                             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         })
-                        
-                        time.sleep(5)  # Additional wait for page load
-                    except Exception as e:
-                        logger.error(f"Error clicking link: {str(e)}")
-                        # Fallback to direct navigation
-                        try:
-                            logger.info("Attempting direct navigation...")
-                            driver.get(target_url)
-                            current_url = driver.current_url
-                            logger.info(f"Directly navigated to: {current_url}")
-                            
-                            # Store the visited page
-                            visited_pages.append({
-                                'url': current_url,
-                                'title': driver.title,
-                                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            })
-                            
-                            time.sleep(2)
-                        except Exception as e2:
-                            logger.error(f"Error in direct navigation: {str(e2)}")
-                else:
-                    logger.info("No match found on current page")
+                except Exception as e:
+                    logger.error(f"Error visiting follow-up link: {str(e)}")
+                    continue
 
-            # Process follow-up links
-            if query_config["follow_up_links"]:
-                logger.info("\nProcessing follow-up links...")
-                for i, follow_up_link in enumerate(query_config["follow_up_links"], 1):
-                    try:
-                        logger.info(f"\n[{i}/{len(query_config['follow_up_links'])}] Visiting follow-up link: {follow_up_link}")
-                        driver.get(follow_up_link)
-                        
-                        # Wait for page to load
-                        WebDriverWait(driver, 5).until(
-                            EC.presence_of_element_located((By.TAG_NAME, "body"))
-                        )
-                        
-                        # Additional wait to ensure dynamic content loads
-                        time.sleep(3)
-                        
-                        # Get page title
-                        page_title = driver.title
-                        logger.info(f"Page title: {page_title}")
-                        
-                        # Get current URL (in case of redirects)
-                        current_url = driver.current_url
-                        logger.info(f"Current URL: {current_url}")
-                        
-                        # Store the visited page
-                        visited_pages.append({
-                            'url': current_url,
-                            'title': page_title,
-                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        })
-                        
-                    except Exception as e:
-                        logger.error(f"Error visiting follow-up link: {str(e)}")
-                        continue
-            else:
-                logger.info("\nNo follow-up links to process")
+        # Log all visited pages
+        logger.info("\nVisited Pages Summary:")
+        logger.info("-" * 50)
+        for page in visited_pages:
+            logger.info(f"Time: {page['timestamp']}")
+            logger.info(f"Title: {page['title']}")
+            logger.info(f"URL: {page['url']}")
+            logger.info("-" * 30)
 
-            # Log all visited pages
-            logger.info("\nVisited Pages Summary:")
-            logger.info("-" * 50)
-            for page in visited_pages:
-                logger.info(f"Time: {page['timestamp']}")
-                logger.info(f"Title: {page['title']}")
-                logger.info(f"URL: {page['url']}")
-                logger.info("-" * 30)
-                    
-        except Exception as e:
-            logger.error(f"Error finding search results: {str(e)}")
-
+    except Exception as e:
+        logger.error(f"Test execution failed: {str(e)}")
+        raise
     finally:
         logger.info(f"Closing driver for web_match: {query_config['web_match']}")
         driver.quit()
